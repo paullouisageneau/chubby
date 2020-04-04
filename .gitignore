@@ -1,0 +1,9 @@
+build/
+__pycache__/
+*.pyc
+*.d
+*.o
+*.a
+*.so
+compile_commands.json
+
