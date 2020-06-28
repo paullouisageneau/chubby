@@ -25,12 +25,12 @@ namespace chubby {
 using namespace std::placeholders;
 using std::shared_ptr;
 
-// InitLogger(LogLevel::Debug);
 
 Session::Session(shared_ptr<Signaling> signaling, string id, RecvCallback dataCallback,
                  RecvCallback mediaCallback)
     : mSignaling(std::move(signaling)), mId(std::move(id)), mDataCallback(std::move(dataCallback)) {
 
+	rtc::InitLogger(rtc::LogLevel::Verbose);
 	std::cout << "Creating session " << mId << std::endl;
 
 	mToken = mSignaling->recv(mId, std::bind(&Session::processSignaling, this, _1));
@@ -53,7 +53,17 @@ Session::~Session() { std::cout << "Destroying session " << mId << std::endl; }
 void Session::open() {
 	const string label = "data";
 	std::cout << "Creating DataChannel \"" << label << "\"" << std::endl;
+
+	const string sdp = "m=audio 54609 UDP/TLS/RTP/SAVPF 109\r\n"
+	                   "a=mid:audio\r\n"
+	                   "a=sendrecv\r\n"
+	                   "m=video 54609 UDP/TLS/RTP/SAVPF 120\r\n"
+	                   "a=mid:video\r\n"
+	                   "a=sendrecv\r\n";
+	mPeerConnection->setLocalDescription(rtc::Description{sdp, rtc::Description::Type::Offer});
+
 	mDataChannel = mPeerConnection->createDataChannel(label);
+
 	mDataChannel->onOpen(std::bind(&Session::onOpen, this));
 	mDataChannel->onClosed(std::bind(&Session::onClosed, this));
 	mDataChannel->onMessage(std::bind(&Session::onMessage, this, _1));

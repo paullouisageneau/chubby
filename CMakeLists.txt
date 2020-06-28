@@ -4,7 +4,7 @@ project (chubby
 	VERSION 0.0.1
 	LANGUAGES CXX)
 
-option(USE_GNUTLS "Use GnuTLS instead of OpenSSL" ON)
+option(USE_GNUTLS "Use GnuTLS instead of OpenSSL" OFF)
 option(USE_JUICE "Use libjuice instead of libnice" ON)
 option(USE_SRTP "Use SRTP for media" ON)
 

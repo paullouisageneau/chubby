@@ -23,9 +23,11 @@
 #include <exception>
 #include <iostream>
 #include <list>
+#include <sstream>
 #include <stdexcept>
 #include <thread>
 
+#include <netdb.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/types.h>
@@ -44,31 +46,70 @@ void showUsage(const string &name) {
 	          << "Options:" << std::endl
 	          << "\t-h, --help\t\tShow this help message" << std::endl
 	          << "\t-s, --sig URL\t\tSpecify the signaling server URL" << std::endl
-	          << "\t-d, --data FILE\t\tSpecify the data socket" << std::endl
-	          << "\t-m, --media FILE\t\tSpecify the media socket" << std::endl;
+	          << "\t-d, --data ADDRESS\t\tSpecify the data UDP socket address" << std::endl
+	          << "\t-m, --media ADDRESS\t\tSpecify the media UDP socket address" << std::endl;
 }
 
-int unixSocket(const string &name) {
-	int sock = socket(AF_UNIX, SOCK_DGRAM, 0);
-	if (sock == -1)
-		throw std::runtime_error("Failed to create unix socket");
+int udpSocket(const string &name, struct sockaddr_storage &addr, socklen_t &addrlen) {
+	string local, host, service;
+	size_t p1 = name.find_first_of(':');
+	local = name.substr(0, p1);
+	if (p1 != string::npos) {
+		size_t p2 = name.find_last_of(':');
+		if (p2 != string::npos) {
+			host = name.substr(p1 + 1, p2 - (p1 + 1));
+			service = name.substr(p2 + 1);
+		} else {
+			host = "localhost";
+			service = name.substr(p1 + 1);
+		}
+	} else {
+		host = "localhost";
+		std::ostringstream oss;
+		oss << std::stol(service) + 1;
+		service = oss.str();
+	}
 
-	struct sockaddr_un sun;
-	std::memset(&sun, 0, sizeof(sun));
-	sun.sun_family = AF_UNIX;
-	std::strncpy(sun.sun_path, name.c_str(), sizeof(sun.sun_path) - 1);
+	struct addrinfo hints = {};
+	hints.ai_family = AF_UNSPEC;
+	hints.ai_socktype = SOCK_DGRAM;
+	hints.ai_protocol = IPPROTO_UDP;
+	hints.ai_flags = AI_ADDRCONFIG;
 
-	unlink(name.c_str());
-	if (bind(sock, (struct sockaddr *)&sun, sizeof(sun)) == -1)
-		throw std::runtime_error("Failed to open unix socket " + name);
+	struct addrinfo *res = nullptr;
+	if (getaddrinfo(nullptr, local.c_str(), &hints, &res) != 0 || !res)
+		throw std::runtime_error("Failed to resolve local address");
 
+	int sock;
+	try {
+		sock = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+		if (sock == -1)
+			throw std::runtime_error("Failed to create socket");
+
+		if (bind(sock, reinterpret_cast<struct sockaddr *>(res->ai_addr), res->ai_addrlen) == -1)
+			throw std::runtime_error("Failed to bind socket");
+	} catch (...) {
+		freeaddrinfo(res);
+		throw;
+	}
+
+	freeaddrinfo(res);
+
+	res = nullptr;
+	if (getaddrinfo(host.c_str(), service.c_str(), &hints, &res) != 0 || !res)
+		throw std::runtime_error("Failed to resolve remote address");
+
+	std::memcpy(&addr, res->ai_addr, res->ai_addrlen);
+	addrlen = res->ai_addrlen;
+
+	freeaddrinfo(res);
 	return sock;
 }
 
 int main(int argc, char *argv[]) {
 	string url = "ws://localhost:8000";
-	string dataName = "data";
-	string mediaName = "media";
+	string dataName = "8001:localhost:8002";
+	string mediaName = "8003:localhost:8004";
 
 	try {
 		std::list<string> ids;
@@ -88,14 +129,14 @@ int main(int argc, char *argv[]) {
 				if (i + 1 < argc) {
 					dataName = argv[++i];
 				} else {
-					std::cerr << "--data option requires unix socket as argument." << std::endl;
+					std::cerr << "--data option requires socket address as argument." << std::endl;
 					return 1;
 				}
 			} else if (arg == "-m" || arg == "--media") {
 				if (i + 1 < argc) {
 					mediaName = argv[++i];
 				} else {
-					std::cerr << "--media option requires unix socket as argument." << std::endl;
+					std::cerr << "--media option requires socket address as argument." << std::endl;
 					return 1;
 				}
 			} else {
@@ -108,17 +149,24 @@ int main(int argc, char *argv[]) {
 			return 1;
 		}
 
-		int dataSock = unixSocket(dataName);
-		int mediaSock = unixSocket(mediaName);
+		struct sockaddr_storage dataAddr;
+		socklen_t dataAddrLen = sizeof(dataAddr);
+		int dataSock = udpSocket(dataName, dataAddr, dataAddrLen);
 
-		auto dataFunc = [dataSock](const byte *data, size_t size) {
-			int ret = send(dataSock, data, size, 0);
+		auto dataFunc = [dataSock, dataAddr, dataAddrLen](const byte *data, size_t size) {
+			int ret = sendto(dataSock, data, size, 0,
+			                 reinterpret_cast<const struct sockaddr *>(&dataAddr), dataAddrLen);
 			if (ret < 0)
 				throw std::runtime_error("send failed");
 		};
 
-		auto mediaFunc = [mediaSock](const byte *data, size_t size) {
-			int ret = send(mediaSock, data, size, 0);
+		struct sockaddr_storage mediaAddr;
+		socklen_t mediaAddrLen = sizeof(dataAddr);
+		int mediaSock = udpSocket(mediaName, mediaAddr, mediaAddrLen);
+
+		auto mediaFunc = [mediaSock, mediaAddr, mediaAddrLen](const byte *data, size_t size) {
+			int ret = sendto(mediaSock, data, size, 0,
+			                 reinterpret_cast<const struct sockaddr *>(&mediaAddr), mediaAddrLen);
 			if (ret < 0)
 				throw std::runtime_error("send failed");
 		};
@@ -154,11 +202,14 @@ int main(int argc, char *argv[]) {
 			char buffer[size];
 
 			if (FD_ISSET(dataSock, &readfds)) {
-				int ret = recv(dataSock, buffer, size, MSG_DONTWAIT);
+				struct sockaddr_storage addr;
+				socklen_t addrlen = sizeof(addr);
+				int ret = recvfrom(dataSock, buffer, size, MSG_DONTWAIT,
+				                   reinterpret_cast<struct sockaddr *>(&addr), &addrlen);
 				if (ret == 0) {
 					break;
 				} else if (ret < 0) {
-					if (ret == EAGAIN || ret == EWOULDBLOCK)
+					if (ret != EAGAIN && ret != EWOULDBLOCK)
 						throw std::runtime_error("recv failed");
 				} else {
 					for (auto &s : sessions)
@@ -167,11 +218,14 @@ int main(int argc, char *argv[]) {
 			}
 
 			if (FD_ISSET(mediaSock, &readfds)) {
-				int ret = recv(mediaSock, buffer, size, MSG_DONTWAIT);
+				struct sockaddr_storage addr;
+				socklen_t addrlen = sizeof(addr);
+				int ret = recvfrom(mediaSock, buffer, size, MSG_DONTWAIT,
+				                   reinterpret_cast<struct sockaddr *>(&addr), &addrlen);
 				if (ret == 0) {
 					break;
 				} else if (ret < 0) {
-					if (ret == EAGAIN || ret == EWOULDBLOCK)
+					if (ret != EAGAIN && ret != EWOULDBLOCK)
 						throw std::runtime_error("recv failed");
 				} else {
 					for (auto &s : sessions)
