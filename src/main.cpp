@@ -46,8 +46,8 @@ void showUsage(const string &name) {
 	          << "Options:" << std::endl
 	          << "\t-h, --help\t\tShow this help message" << std::endl
 	          << "\t-s, --sig URL\t\tSpecify the signaling server URL" << std::endl
-	          << "\t-d, --data ADDRESS\t\tSpecify the data UDP socket address" << std::endl
-	          << "\t-m, --media ADDRESS\t\tSpecify the media UDP socket address" << std::endl;
+	          << "\t-d, --data ADDRESS\tSpecify the data UDP socket address" << std::endl
+	          << "\t-m, --media ADDRESS\tSpecify the media UDP socket address" << std::endl;
 }
 
 int udpSocket(const string &name, struct sockaddr_storage &addr, socklen_t &addrlen) {
