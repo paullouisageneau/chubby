@@ -77,6 +77,16 @@ int udpSocket(const string &name, struct sockaddr_storage &addr, socklen_t &addr
 	hints.ai_flags = AI_ADDRCONFIG;
 
 	struct addrinfo *res = nullptr;
+	if (getaddrinfo(host.c_str(), service.c_str(), &hints, &res) != 0 || !res)
+		throw std::runtime_error("Failed to resolve remote address");
+
+	std::memcpy(&addr, res->ai_addr, res->ai_addrlen);
+	addrlen = res->ai_addrlen;
+
+	freeaddrinfo(res);
+
+	hints.ai_family = addr.ss_family;
+	res = nullptr;
 	if (getaddrinfo(nullptr, local.c_str(), &hints, &res) != 0 || !res)
 		throw std::runtime_error("Failed to resolve local address");
 
@@ -92,15 +102,6 @@ int udpSocket(const string &name, struct sockaddr_storage &addr, socklen_t &addr
 		freeaddrinfo(res);
 		throw;
 	}
-
-	freeaddrinfo(res);
-
-	res = nullptr;
-	if (getaddrinfo(host.c_str(), service.c_str(), &hints, &res) != 0 || !res)
-		throw std::runtime_error("Failed to resolve remote address");
-
-	std::memcpy(&addr, res->ai_addr, res->ai_addrlen);
-	addrlen = res->ai_addrlen;
 
 	freeaddrinfo(res);
 	return sock;

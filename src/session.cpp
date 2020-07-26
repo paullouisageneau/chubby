@@ -30,7 +30,7 @@ Session::Session(shared_ptr<Signaling> signaling, string id, RecvCallback dataCa
                  RecvCallback mediaCallback)
     : mSignaling(std::move(signaling)), mId(std::move(id)), mDataCallback(std::move(dataCallback)) {
 
-	rtc::InitLogger(rtc::LogLevel::Verbose);
+	rtc::InitLogger(rtc::LogLevel::Warning);
 	std::cout << "Creating session " << mId << std::endl;
 
 	mToken = mSignaling->recv(mId, std::bind(&Session::processSignaling, this, _1));
